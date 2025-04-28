@@ -226,11 +226,6 @@ pub struct CurrencyPrice {
     pub currency: String,
 }
 
-#[derive(Deserialize)]
-struct CurrentTime {
-    iso: DateTime,
-}
-
 #[cfg(test)]
 mod test {
     use bigdecimal::FromPrimitive;
@@ -303,18 +298,5 @@ mod test {
             BigDecimal::from_f32(1010.25).unwrap()
         );
         assert_eq!(currency_price.currency, "USD");
-    }
-
-    #[test]
-    fn test_current_time_deserialize() {
-        let input = r#"
-    {
-    "iso": "2015-06-23T18:02:51Z",
-    "epoch": 1435082571
-    }"#;
-        let time: crate::DateTime = serde_json::from_slice(input.as_bytes())
-            .map(|c: CurrentTime| c.iso)
-            .unwrap();
-        assert_eq!(1435082571, time.timestamp());
     }
 }

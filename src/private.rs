@@ -29,10 +29,7 @@ impl Private {
     /// https://developers.coinbase.com/api/v2#list-accounts
     ///
     pub fn accounts<'a>(&'a self) -> impl Stream<Item = Result<Vec<Account>>> + 'a {
-        let limit = 100;
-        let uri = UriTemplate::new("/v2/accounts{?query*}")
-            .set("query", &[("limit", limit.to_string().as_ref())])
-            .build();
+        let uri = UriTemplate::new("/v2/accounts").build();
         let request = self.request(&uri);
         self._pub.get_stream(request)
     }

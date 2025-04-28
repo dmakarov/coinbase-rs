@@ -1,18 +1,14 @@
 use std::collections::HashMap;
 use std::result;
-use std::time::{SystemTime, UNIX_EPOCH};
 
-use hmac::{Hmac, Mac};
 use http::{request, Method, Request, Uri, Version};
 use hyper::Body;
-use sha2::Sha256;
+use jwt_simple::prelude::*;
 
 #[derive(Debug)]
 pub struct Error {}
 
 pub type Result<T> = result::Result<T, Error>;
-
-type HmacSha256 = Hmac<Sha256>;
 
 const USER_AGENT: &str = concat!("coinbase-rs/", env!("CARGO_PKG_VERSION"));
 
@@ -29,6 +25,11 @@ pub struct Parts {
 
     /// The request's headers
     pub headers: HashMap<String, String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Payload {
+    uri: String,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -97,30 +98,20 @@ impl Builder {
 
     pub fn build(self) -> Request<Body> {
         let _self = if let Some((ref key, ref secret)) = self.auth {
-            let timestamp = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("leap-second")
-                .as_secs();
-
-            let sign = Self::sign(
-                secret,
-                timestamp,
-                &self.parts.method,
-                self.parts.uri.path_and_query().unwrap().as_str(),
-                &self.body,
+            let path = format!(
+                "{}{}",
+                self.parts.uri.host().unwrap(),
+                self.parts.uri.path_and_query().unwrap(),
             );
-
+            let token = Self::token(key, secret, &self.parts.method, &path);
+            let bearer = format!("Bearer {token}");
             self.clone()
                 .header("User-Agent", USER_AGENT)
-                .header("Content-Type", "Application/JSON")
-                .header("CB-VERSION", "2021-01-01")
-                .header("CB-ACCESS-KEY", key)
-                .header("CB-ACCESS-SIGN", &sign)
-                .header("CB-ACCESS-TIMESTAMP", &timestamp.to_string())
+                .header("Content-Type", "text/plain; charset=utf-8")
+                .header("Authorization", &bearer)
         } else {
             self
         };
-
         let mut builder = request::Builder::new()
             .method(_self.parts.method)
             .uri(_self.parts.uri);
@@ -130,12 +121,39 @@ impl Builder {
         builder.body(_self.body.into()).unwrap()
     }
 
-    fn sign(secret: &str, timestamp: u64, method: &Method, path: &str, body: &Vec<u8>) -> String {
-        let mut mac: Hmac<Sha256> =
-            HmacSha256::new_varkey(&secret.as_bytes()).expect("Hmac::new(secret)");
-        let input = timestamp.to_string() + method.as_str() + path;
-        mac.input(input.as_bytes());
-        mac.input(body);
-        format!("{:x}", &mac.result().code())
+    fn token(key_name: &str, secret: &str, method: &Method, path: &str) -> String {
+        let pkey = match elliptic_curve::SecretKey::<p256::NistP256>::from_sec1_pem(secret) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("Failed to load private key from pem: {e}");
+                return String::default();
+            }
+        };
+        let key_pair = match jwt_simple::prelude::ES256KeyPair::from_bytes(&pkey.to_bytes()) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("Failed to load key_pair from bytes: {e}");
+                return String::default();
+            }
+        };
+        let key_pair = key_pair.with_key_id(key_name);
+        let payload = Payload {
+            uri: format!("{} {}", method.as_str(), path),
+        };
+        let mut claims = jwt_simple::claims::Claims::with_custom_claims(
+            payload,
+            coarsetime::Duration::from_secs(120),
+        )
+        .with_issuer("cdp".to_string())
+        .with_subject(key_name);
+        claims.create_nonce();
+        let token = match key_pair.sign(claims) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("Failed to sign claims: {e}");
+                return String::default();
+            }
+        };
+        token.to_string()
     }
 }
