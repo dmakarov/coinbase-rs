@@ -13,7 +13,7 @@ use crate::{request, CBError, DateTime, Result};
 
 pub struct Public {
     pub(crate) uri: String,
-    client: Client<HttpsConnector<HttpConnector>>,
+    pub(crate) client: Client<HttpsConnector<HttpConnector>>,
 }
 
 impl Public {

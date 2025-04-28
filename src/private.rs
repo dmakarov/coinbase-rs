@@ -1,10 +1,13 @@
+use std::thread;
+use std::time::Duration;
+
 use bigdecimal::BigDecimal;
 use futures::stream::Stream;
 use hyper::Uri;
 use uritemplate::UriTemplate;
 use uuid::Uuid;
 
-use crate::{public::Public, request, DateTime, Result};
+use crate::{public::Public, request, CBError, DateTime, Result};
 
 pub struct Private {
     _pub: Public,
@@ -70,6 +73,27 @@ impl Private {
             .build();
         let request = self.request(&uri);
         self._pub.get_stream(request)
+    }
+
+    pub async fn list_payment_methods(&self) -> Result<Vec<PaymentMethod>> {
+        let uri = UriTemplate::new("/api/v3/brokerage/payment_methods").build();
+        let request = self.request(&uri);
+
+        thread::sleep(Duration::from_millis(350));
+
+        let request = request.clone().build();
+        let request_future = self._pub.client.request(request);
+
+        let response = request_future.await?;
+        let body = hyper::body::to_bytes(response.into_body()).await?;
+
+        match serde_json::from_slice::<PaymentMethods>(&body) {
+            Ok(body) => Ok(body.payment_methods),
+            Err(e) => match serde_json::from_slice(&body) {
+                Ok(coinbase_err) => Err(CBError::Coinbase(coinbase_err)),
+                Err(_) => Err(CBError::Serde(e)),
+            },
+        }
     }
 
     fn request(&self, _uri: &str) -> request::Builder {
@@ -184,6 +208,26 @@ pub struct Pagination {
     pub order: Order,
     pub previous_uri: Option<String>,
     pub next_uri: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct PaymentMethod {
+    pub id: String,
+    pub r#type: String,
+    pub name: String,
+    pub currency: String,
+    pub verified: bool,
+    pub allow_buy: bool,
+    pub allow_sell: bool,
+    pub allow_deposit: bool,
+    pub allow_withdraw: bool,
+    pub created_at: DateTime,
+    pub updated_at: DateTime,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct PaymentMethods {
+    pub payment_methods: Vec<PaymentMethod>,
 }
 
 #[test]
