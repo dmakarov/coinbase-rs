@@ -31,7 +31,7 @@ impl Private {
     ///
     /// https://developers.coinbase.com/api/v2#list-accounts
     ///
-    pub fn accounts<'a>(&'a self) -> impl Stream<Item = Result<Vec<Account>>> + 'a {
+    pub fn accounts(&self) -> impl Stream<Item = Result<Vec<Account>>> + '_ {
         let uri = UriTemplate::new("/v2/accounts").build();
         let request = self.request(&uri);
         self._pub.get_stream(request)
@@ -89,6 +89,48 @@ impl Private {
 
         match serde_json::from_slice::<PaymentMethods>(&body) {
             Ok(body) => Ok(body.payment_methods),
+            Err(e) => match serde_json::from_slice(&body) {
+                Ok(coinbase_err) => Err(CBError::Coinbase(coinbase_err)),
+                Err(_) => Err(CBError::Serde(e)),
+            },
+        }
+    }
+
+    pub async fn withdrawals(
+        &self,
+        account_id: &Uuid,
+        amount: String,
+        currency: String,
+        payment_method: Uuid,
+    ) -> Result<Transfer> {
+        let uri = UriTemplate::new("/v2/accounts/{account}/withdrawals")
+            .set("account", account_id.to_string())
+            .build();
+        let request = self.request(&uri);
+
+        thread::sleep(Duration::from_millis(350));
+
+        let body = match serde_json::to_vec(&Withdrawal {
+            amount,
+            currency,
+            payment_method: payment_method.to_string(),
+            commit: true,
+        }) {
+            Ok(body) => body,
+            Err(e) => return Err(CBError::Serde(e)),
+        };
+        let request = request
+            .clone()
+            .method(http::Method::POST)
+            .body(&body)
+            .build();
+        let request_future = self._pub.client.request(request);
+
+        let response = request_future.await?;
+        let body = hyper::body::to_bytes(response.into_body()).await?;
+
+        match serde_json::from_slice::<Transfer>(&body) {
+            Ok(body) => Ok(body),
             Err(e) => match serde_json::from_slice(&body) {
                 Ok(coinbase_err) => Err(CBError::Coinbase(coinbase_err)),
                 Err(_) => Err(CBError::Serde(e)),
@@ -228,6 +270,93 @@ pub struct PaymentMethod {
 #[derive(Deserialize, Debug)]
 pub struct PaymentMethods {
     pub payment_methods: Vec<PaymentMethod>,
+}
+
+#[derive(Deserialize, Debug)]
+#[allow(non_snake_case)]
+pub struct Transfer {
+    pub user_entered_amount: Amount,
+    pub amount: Amount,
+    pub total: Amount,
+    pub subtotal: Amount,
+    pub idem: String,
+    pub committed: bool,
+    pub id: String,
+    pub instant: bool,
+    pub source: Source,
+    pub target: Target,
+    pub payout_at: DateTime,
+    pub status: String,
+    pub user_reference: String,
+    pub r#type: String,
+    pub created_at: Option<DateTime>,
+    pub updated_at: Option<DateTime>,
+    pub user_warnings: Vec<String>,
+    pub fees: Vec<String>,
+    pub total_fee: Fee,
+    pub cancellation_reason: Option<String>,
+    pub hold_days: usize,
+    pub nextStep: Option<String>,
+    pub checkout_url: String,
+    pub requires_completion_step: bool,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Amount {
+    pub value: String,
+    pub currency: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Source {
+    pub r#type: String,
+    pub network: String,
+    pub payment_method_id: String,
+    pub ledger_account: LedgerAccount,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Target {
+    pub r#type: String,
+    pub network: String,
+    pub payment_method_id: String,
+    pub external_payment_method: ExternalPaymentMethod,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Fee {
+    pub title: String,
+    pub description: String,
+    pub amount: Amount,
+    pub r#type: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct LedgerAccount {
+    pub account_id: String,
+    pub currency: String,
+    pub owner: Owner,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct ExternalPaymentMethod {
+    pub payment_method_id: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Owner {
+    pub id: String,
+    pub uuid: String,
+    pub user_uuid: String,
+    pub r#type: String,
+}
+
+#[derive(Serialize, Debug)]
+pub struct Withdrawal {
+    pub amount: String,
+    pub currency: String,
+    pub payment_method: String,
+    pub commit: bool,
 }
 
 #[test]

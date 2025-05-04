@@ -90,9 +90,9 @@ impl Builder {
         _self
     }
 
-    pub fn body(self, body: &Vec<u8>) -> Builder {
+    pub fn body(self, body: &[u8]) -> Builder {
         let mut _self = self;
-        _self.body = body.clone();
+        _self.body = body.to_owned();
         _self
     }
 
