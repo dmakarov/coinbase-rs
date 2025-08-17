@@ -96,6 +96,27 @@ impl Private {
         }
     }
 
+    pub async fn list_public_products(&self) -> Result<Vec<PublicProduct>> {
+        let uri = UriTemplate::new("/api/v3/brokerage/market/products").build();
+        let request = self.request(&uri);
+
+        thread::sleep(Duration::from_millis(350));
+
+        let request = request.clone().build();
+        let request_future = self._pub.client.request(request);
+
+        let response = request_future.await?;
+        let body = hyper::body::to_bytes(response.into_body()).await?;
+
+        match serde_json::from_slice::<PublicProducts>(&body) {
+            Ok(body) => Ok(body.products),
+            Err(e) => match serde_json::from_slice(&body) {
+                Ok(coinbase_err) => Err(CBError::Coinbase(coinbase_err)),
+                Err(_) => Err(CBError::Serde(e)),
+            },
+        }
+    }
+
     pub async fn withdrawals(
         &self,
         account_id: &Uuid,
@@ -270,6 +291,105 @@ pub struct PaymentMethod {
 #[derive(Deserialize, Debug)]
 pub struct PaymentMethods {
     pub payment_methods: Vec<PaymentMethod>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Maintenance {
+    pub start_time: String,
+    pub end_time: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct FcmTradingSessionDetails {
+    pub is_session_open: bool,
+    pub open_time: String,
+    pub close_time: String,
+    pub session_state: String,
+    pub after_hours_order_entry_disabled: bool,
+    pub closed_reason: String,
+    pub maintenance: Maintenance,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct PerpetualDetails {
+    pub open_interest: String,
+    pub funding_rate: String,
+    pub funding_time: String,
+    pub max_leverage: String,
+    pub base_asset_uuid: String,
+    pub underlying_type: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct FutureProductDetails {
+    pub venue: String,
+    pub contract_code: String,
+    pub contract_expiry: String,
+    pub contract_size: String,
+    pub contract_root_unit: String,
+    pub group_description: String,
+    pub contract_expiry_timezone: String,
+    pub group_short_description: String,
+    pub risk_managed_by: String,
+    pub contract_expiry_type: String,
+    pub perpetual_details: PerpetualDetails,
+    pub contract_display_name: String,
+    pub time_to_expiry_ms: String,
+    pub non_crypto: bool,
+    pub contract_expiry_name: String,
+    pub twenty_four_by_seven: bool,
+    pub funding_interval: String,
+    pub open_interest: String,
+    pub funding_rate: String,
+    pub funding_time: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct PublicProduct {
+    pub product_id: String,
+    pub price: String,
+    pub price_percentage_change_24h: String,
+    pub volume_24h: String,
+    pub volume_percentage_change_24h: String,
+    pub base_increment: String,
+    pub quote_increment: String,
+    pub quote_min_size: String,
+    pub quote_max_size: String,
+    pub base_min_size: String,
+    pub base_max_size: String,
+    pub base_name: String,
+    pub quote_name: String,
+    pub watched: bool,
+    pub is_disabled: bool,
+    pub new: bool,
+    pub status: String,
+    pub cancel_only: bool,
+    pub limit_only: bool,
+    pub post_only: bool,
+    pub trading_disabled: bool,
+    pub action_mode: Option<bool>,
+    pub base_display_symbol: String,
+    pub quote_display_symbol: String,
+    pub product_type: String,
+    pub quote_currency_id: String,
+    pub base_currency_id: String,
+    pub fcm_trading_session_details: Option<FcmTradingSessionDetails>,
+    pub mid_market_price: String,
+    pub alias: String,
+    pub alias_to: Vec<String>,
+    pub view_only: bool,
+    pub price_increment: String,
+    pub display_name: String,
+    pub product_venue: String,
+    pub approximate_quote_24h_volume: String,
+    pub new_at: String,
+    pub future_product_details: Option<FutureProductDetails>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct PublicProducts {
+    pub products: Vec<PublicProduct>,
+    pub num_products: usize,
 }
 
 #[derive(Deserialize, Debug)]
