@@ -29,12 +29,27 @@ impl Private {
     ///
     /// Lists current user’s accounts to which the authentication method has access to.
     ///
-    /// https://developers.coinbase.com/api/v2#list-accounts
+    /// https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/accounts/list-accounts
     ///
-    pub fn accounts(&self) -> impl Stream<Item = Result<Vec<Account>>> + '_ {
-        let uri = UriTemplate::new("/v2/accounts").build();
+    pub async fn accounts(&self) -> Result<Vec<Account>> {
+        let uri = UriTemplate::new("/api/v3/brokerage/accounts").build();
         let request = self.request(&uri);
-        self._pub.get_stream(request)
+
+        thread::sleep(Duration::from_millis(350));
+
+        let request = request.clone().build();
+        let request_future = self._pub.client.request(request);
+
+        let response = request_future.await?;
+        let body = hyper::body::to_bytes(response.into_body()).await?;
+
+        match serde_json::from_slice::<Accounts>(&body) {
+            Ok(body) => Ok(body.accounts),
+            Err(e) => match serde_json::from_slice(&body) {
+                Ok(coinbase_err) => Err(CBError::Coinbase(coinbase_err)),
+                Err(_) => Err(CBError::Serde(e)),
+            },
+        }
     }
 
     ///
@@ -166,27 +181,35 @@ impl Private {
 }
 
 #[derive(Deserialize, Debug)]
+pub struct Value {
+    pub value: String,
+    pub currency: String,
+}
+
+#[derive(Deserialize, Debug)]
 pub struct Account {
-    // id appears to be either a UUID or a token name e.g: "LINK"
-    pub id: String,
-
-    pub r#type: String,
-
-    pub created_at: Option<DateTime>,
-    pub updated_at: Option<DateTime>,
-
-    pub resource: String,
-    pub resource_path: String,
-
+    pub uuid: String,
     pub name: String,
-    pub primary: bool,
+    pub currency: String,
+    pub available_balance: Value,
+    pub default: bool,
+    pub active: bool,
+    pub created_at: String,
+    pub updated_at: String,
+    pub deleted_at: Option<String>,
+    pub r#type: String,
+    pub ready: bool,
+    pub hold: Value,
+    pub retail_portfolio_id: String,
+    pub platform: String,
+}
 
-    pub currency: Currency,
-
-    pub balance: Balance,
-
-    pub allow_deposits: bool,
-    pub allow_withdrawals: bool,
+#[derive(Deserialize, Debug)]
+pub struct Accounts {
+    pub has_next: bool,
+    pub accounts: Vec<Account>,
+    pub cursor: String,
+    pub size: usize,
 }
 
 #[derive(Deserialize, Debug)]
@@ -500,34 +523,28 @@ fn test_pagination_deserialize() {
 #[test]
 fn test_account_deserialize() {
     let input = r##"[
-{
-  "id": "f1bb8f61-7f5d-4f04-9552-bcbafdf856b7",
-  "type": "wallet",
-  "created_at": "2019-07-12T03:27:07Z",
-  "updated_at": "2019-07-12T14:07:57Z",
-  "resource": "account",
-  "resource_path": "/v2/accounts/f1bb8f61-7f5d-4f04-9552-bcbafdf856b7",
-  "name": "EOS Wallet",
-  "primary": true,
-  "currency": {
-    "code": "EOS",
-    "name": "EOS",
-    "color": "#000000",
-    "sort_index": 128,
-    "exponent": 4,
-    "type": "crypto",
-    "address_regex": "(^[a-z1-5.]{1,11}[a-z1-5]$)|(^[a-z1-5.]{12}[a-j1-5]$)",
-    "asset_id": "cc2ddaa5-5a03-4cbf-93ef-e4df102d4311",
-    "destination_tag_name": "EOS Memo",
-    "destination_tag_regex": "^.{1,100}$"
-  },
-  "balance": {
-    "amount": "9.1238",
-    "currency": "EOS"
-  },
-  "allow_deposits": true,
-  "allow_withdrawals": true
-}
+  {
+    "uuid": "8bfc20d7-f7c6-4422-bf07-8243ca4169fe",
+    "name": "BTC Wallet",
+    "currency": "BTC",
+    "available_balance": {
+      "value": "1.23",
+      "currency": "BTC"
+    },
+    "default": false,
+    "active": true,
+    "created_at": "2021-05-31T09:59:59.000Z",
+    "updated_at": "2021-05-31T09:59:59.000Z",
+    "deleted_at": "2021-05-31T09:59:59.000Z",
+    "type": "FIAT",
+    "ready": true,
+    "hold": {
+      "value": "1.23",
+      "currency": "BTC"
+    },
+    "retail_portfolio_id": "b87a2d3f-8a1e-49b3-a4ea-402d8c389aca",
+    "platform": "ACCOUNT_PLATFORM_CONSUMER"
+  }
 ]"##;
 
     let accounts: Vec<Account> = serde_json::from_slice(input.as_bytes()).unwrap();
