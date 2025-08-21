@@ -134,13 +134,13 @@ impl Private {
 
     pub async fn withdrawals(
         &self,
-        account_id: &Uuid,
+        account_id: String,
         amount: String,
         currency: String,
-        payment_method: Uuid,
+        payment_method: String,
     ) -> Result<Transfer> {
         let uri = UriTemplate::new("/v2/accounts/{account}/withdrawals")
-            .set("account", account_id.to_string())
+            .set("account", account_id)
             .build();
         let request = self.request(&uri);
 
@@ -149,7 +149,7 @@ impl Private {
         let body = match serde_json::to_vec(&Withdrawal {
             amount,
             currency,
-            payment_method: payment_method.to_string(),
+            payment_method,
             commit: true,
         }) {
             Ok(body) => body,
@@ -181,17 +181,11 @@ impl Private {
 }
 
 #[derive(Deserialize, Debug)]
-pub struct Value {
-    pub value: String,
-    pub currency: String,
-}
-
-#[derive(Deserialize, Debug)]
 pub struct Account {
     pub uuid: String,
     pub name: String,
     pub currency: String,
-    pub available_balance: Value,
+    pub available_balance: Amount,
     pub default: bool,
     pub active: bool,
     pub created_at: String,
@@ -199,7 +193,7 @@ pub struct Account {
     pub deleted_at: Option<String>,
     pub r#type: String,
     pub ready: bool,
-    pub hold: Value,
+    pub hold: Amount,
     pub retail_portfolio_id: String,
     pub platform: String,
 }
