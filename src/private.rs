@@ -165,8 +165,8 @@ impl Private {
         let response = request_future.await?;
         let body = hyper::body::to_bytes(response.into_body()).await?;
 
-        match serde_json::from_slice::<Transfer>(&body) {
-            Ok(body) => Ok(body),
+        match serde_json::from_slice::<TransferResponse>(&body) {
+            Ok(body) => Ok(body.transfer),
             Err(e) => match serde_json::from_slice(&body) {
                 Ok(coinbase_err) => Err(CBError::Coinbase(coinbase_err)),
                 Err(_) => Err(CBError::Serde(e)),
@@ -410,19 +410,24 @@ pub struct PublicProducts {
 }
 
 #[derive(Deserialize, Debug)]
+pub struct TransferResponse {
+    pub transfer: Transfer,
+}
+
+#[derive(Deserialize, Debug)]
 #[allow(non_snake_case)]
 pub struct Transfer {
-    pub user_entered_amount: Amount,
-    pub amount: Amount,
-    pub total: Amount,
-    pub subtotal: Amount,
+    pub user_entered_amount: Option<Amount>,
+    pub amount: Option<Amount>,
+    pub total: Option<Amount>,
+    pub subtotal: Option<Amount>,
     pub idem: String,
     pub committed: bool,
     pub id: String,
     pub instant: bool,
-    pub source: Source,
-    pub target: Target,
-    pub payout_at: DateTime,
+    pub source: Option<Source>,
+    pub target: Option<Target>,
+    pub payout_at: Option<DateTime>,
     pub status: String,
     pub user_reference: String,
     pub r#type: String,
@@ -430,12 +435,13 @@ pub struct Transfer {
     pub updated_at: Option<DateTime>,
     pub user_warnings: Vec<String>,
     pub fees: Vec<String>,
-    pub total_fee: Fee,
-    pub cancellation_reason: Option<String>,
+    pub total_fee: Option<Fee>,
+    pub cancellation_reason: Option<CancellationReason>,
     pub hold_days: usize,
     pub nextStep: Option<String>,
     pub checkout_url: String,
     pub requires_completion_step: bool,
+    pub transfer_settings: Option<TransferSettings>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -466,6 +472,17 @@ pub struct Fee {
     pub description: String,
     pub amount: Amount,
     pub r#type: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct CancellationReason {
+    pub message: String,
+    pub code: String,
+    pub error_code: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct TransferSettings {
 }
 
 #[derive(Deserialize, Debug)]
