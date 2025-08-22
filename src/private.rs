@@ -174,6 +174,84 @@ impl Private {
         }
     }
 
+    pub async fn create_convert_quote(
+        &self,
+        from_account: String,
+        to_account: String,
+        amount: String,
+    ) -> Result<Trade> {
+        let uri = UriTemplate::new("/api/v3/brokerage/convert/quote").build();
+        let request = self.request(&uri);
+
+        thread::sleep(Duration::from_millis(350));
+
+        let body = match serde_json::to_vec(&ConvertRequest {
+            from_account,
+            to_account,
+            amount,
+            trade_incentive_metadata: None,
+        }) {
+            Ok(body) => body,
+            Err(e) => return Err(CBError::Serde(e)),
+        };
+        let request = request
+            .clone()
+            .method(http::Method::POST)
+            .body(&body)
+            .build();
+        let request_future = self._pub.client.request(request);
+
+        let response = request_future.await?;
+        let body = hyper::body::to_bytes(response.into_body()).await?;
+
+        match serde_json::from_slice::<ConvertQuote>(&body) {
+            Ok(body) => Ok(body.trade),
+            Err(e) => match serde_json::from_slice(&body) {
+                Ok(coinbase_err) => Err(CBError::Coinbase(coinbase_err)),
+                Err(_) => Err(CBError::Serde(e)),
+            },
+        }
+    }
+
+    pub async fn commit_convert_trade(
+        &self,
+        from_account: String,
+        to_account: String,
+        trade_id: String,
+    ) -> Result<Trade> {
+        let uri = UriTemplate::new("/api/v3/brokerage/convert/trade/{trade_id}")
+            .set("trade_id", trade_id)
+            .build();
+        let request = self.request(&uri);
+
+        thread::sleep(Duration::from_millis(350));
+
+        let body = match serde_json::to_vec(&ConvertTrade {
+            from_account,
+            to_account,
+        }) {
+            Ok(body) => body,
+            Err(e) => return Err(CBError::Serde(e)),
+        };
+        let request = request
+            .clone()
+            .method(http::Method::POST)
+            .body(&body)
+            .build();
+        let request_future = self._pub.client.request(request);
+
+        let response = request_future.await?;
+        let body = hyper::body::to_bytes(response.into_body()).await?;
+
+        match serde_json::from_slice::<ConvertQuote>(&body) {
+            Ok(body) => Ok(body.trade),
+            Err(e) => match serde_json::from_slice(&body) {
+                Ok(coinbase_err) => Err(CBError::Coinbase(coinbase_err)),
+                Err(_) => Err(CBError::Serde(e)),
+            },
+        }
+    }
+
     fn request(&self, _uri: &str) -> request::Builder {
         let uri: Uri = (self._pub.uri.to_string() + _uri).parse().unwrap();
         request::Builder::new_with_auth(&self.key, &self.secret).uri(uri)
@@ -434,8 +512,8 @@ pub struct Transfer {
     pub created_at: Option<DateTime>,
     pub updated_at: Option<DateTime>,
     pub user_warnings: Vec<String>,
-    pub fees: Vec<String>,
-    pub total_fee: Option<Fee>,
+    pub fees: Vec<TransferFee>,
+    pub total_fee: Option<TransferFee>,
     pub cancellation_reason: Option<CancellationReason>,
     pub hold_days: usize,
     pub nextStep: Option<String>,
@@ -467,11 +545,34 @@ pub struct Target {
 }
 
 #[derive(Deserialize, Debug)]
-pub struct Fee {
+pub struct TransferFee {
     pub title: String,
     pub description: String,
     pub amount: Amount,
     pub r#type: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Fee {
+    pub title: String,
+    pub description: String,
+    pub amount: Amount,
+    pub label: String,
+    pub disclosure: Option<Disclosure>,
+    pub waived_details: Option<WaivedDetails>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Disclosure {
+    pub title: String,
+    pub description: String,
+    pub link: Link,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct WaivedDetails {
+    pub amount: Amount,
+    pub source: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -512,6 +613,113 @@ pub struct Withdrawal {
     pub payment_method: String,
     pub commit: bool,
 }
+
+#[derive(Serialize, Debug)]
+pub struct ConvertRequest {
+    pub from_account: String,
+    pub to_account: String,
+    pub amount: String,
+    pub trade_incentive_metadata: Option<TradeIncenive>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct ConvertTrade {
+    pub from_account: String,
+    pub to_account: String,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+pub struct TradeIncenive {
+    pub user_incentive_id: String,
+    pub code_val: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct ConvertQuote {
+    pub trade: Trade,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Price {
+    pub target_to_fiat: Option<AmountScale>,
+    pub target_to_source: Option<AmountScale>,
+    pub source_to_fiat: Option<AmountScale>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct AmountScale {
+    pub amount: Amount,
+    pub scale: u64,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Warning {
+    pub id: String,
+    pub link: Link,
+    pub context: WarningContext,
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Link {
+    pub text: String,
+    pub url: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct WarningContext {
+    pub details: Vec<String>,
+    pub title: String,
+    pub link_text: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct SubscriptionInfo {
+    pub free_trading_reset_date: String,
+    pub used_zero_fee_trading: Amount,
+    pub remaining_free_trading_volume: Amount,
+    pub max_free_trading_volume: Amount,
+    pub has_benefit_cap: bool,
+    pub applied_subscription_benefit: bool,
+    pub fee_without_subscription_benefit: Amount,
+    pub payment_method_fee_without_subscription_benefit: Amount,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct TaxDetails {
+    pub name: String,
+    pub amount: Amount,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Trade {
+    pub id: String,
+    pub status: String,
+    pub user_entered_amount: Amount,
+    pub amount: Amount,
+    pub subtotal: Amount,
+    pub total: Amount,
+    pub fees: Vec<Fee>,
+    pub total_fee: Option<Fee>,
+    pub source: Option<Source>,
+    pub target: Option<Source>,
+    pub unit_price: Price,
+    pub user_warnings: Vec<Warning>,
+    pub user_reference: String,
+    pub source_currency: String,
+    pub target_currency: String,
+    pub cancellation_reason: Option<CancellationReason>,
+    pub source_id: String,
+    pub target_id: String,
+    pub subscription_info: Option<SubscriptionInfo>,
+    pub exchange_rate: Amount,
+    pub tax_details: Vec<TaxDetails>,
+    pub trade_incentive_info: Option<TradeIncenive>,
+    pub total_fee_without_tax: Option<Fee>,
+    pub fiat_denoted_total: Option<Amount>,
+}
+
 
 #[test]
 fn test_pagination_deserialize() {
