@@ -36,7 +36,7 @@ impl Public {
     ///
     /// https://developers.coinbase.com/api/v2#currencies
     ///
-    pub fn currencies(& self) -> impl Stream<Item = Result<Vec<Currency>>> + '_ {
+    pub fn currencies(&self) -> impl Stream<Item = Result<Vec<Currency>>> + '_ {
         let limit = 100;
         let uri = UriTemplate::new("/v2/currencies{?query*}")
             .set("query", &[("limit", limit.to_string().as_ref())])

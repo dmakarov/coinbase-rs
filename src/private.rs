@@ -111,6 +111,63 @@ impl Private {
         }
     }
 
+    pub async fn get_product_candles(
+        &self,
+        product_id: String,
+        start: String,
+        end: String,
+    ) -> Result<Vec<Candle>> {
+        let uri = UriTemplate::new("/api/v3/brokerage/products/{product_id}/candles{?query*}")
+            .set("product_id", product_id)
+            .set(
+                "query",
+                &[
+                    ("start", start.as_ref()),
+                    ("end", end.as_ref()),
+                    ("granularity", "ONE_DAY"),
+                ],
+            )
+            .build();
+        let request = self.request(&uri);
+
+        thread::sleep(Duration::from_millis(350));
+
+        let request = request.clone().build();
+        let request_future = self._pub.client.request(request);
+
+        let response = request_future.await?;
+        let body = hyper::body::to_bytes(response.into_body()).await?;
+
+        match serde_json::from_slice::<Candles>(&body) {
+            Ok(body) => Ok(body.candles),
+            Err(e) => match serde_json::from_slice(&body) {
+                Ok(coinbase_err) => Err(CBError::Coinbase(coinbase_err)),
+                Err(_) => Err(CBError::Serde(e)),
+            },
+        }
+    }
+
+    pub async fn list_products(&self) -> Result<Vec<Product>> {
+        let uri = UriTemplate::new("/api/v3/brokerage/products").build();
+        let request = self.request(&uri);
+
+        thread::sleep(Duration::from_millis(350));
+
+        let request = request.clone().build();
+        let request_future = self._pub.client.request(request);
+
+        let response = request_future.await?;
+        let body = hyper::body::to_bytes(response.into_body()).await?;
+
+        match serde_json::from_slice::<Products>(&body) {
+            Ok(body) => Ok(body.products),
+            Err(e) => match serde_json::from_slice(&body) {
+                Ok(coinbase_err) => Err(CBError::Coinbase(coinbase_err)),
+                Err(_) => Err(CBError::Serde(e)),
+            },
+        }
+    }
+
     pub async fn list_public_products(&self) -> Result<Vec<PublicProduct>> {
         let uri = UriTemplate::new("/api/v3/brokerage/market/products").build();
         let request = self.request(&uri);
@@ -358,14 +415,10 @@ pub enum Order {
 
 #[derive(Deserialize, Debug)]
 pub struct Pagination {
-    pub ending_before: Option<DateTime>,
-    pub starting_after: Option<DateTime>,
-    pub previous_ending_before: Option<String>,
-    pub next_starting_after: Option<String>,
-    pub limit: usize,
-    pub order: Order,
-    pub previous_uri: Option<String>,
-    pub next_uri: Option<String>,
+    pub prev_cursor: Option<String>,
+    pub next_cursor: Option<String>,
+    pub has_next: bool,
+    pub has_prev: bool,
 }
 
 #[derive(Deserialize, Debug)]
@@ -437,6 +490,74 @@ pub struct FutureProductDetails {
     pub open_interest: String,
     pub funding_rate: String,
     pub funding_time: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Candle {
+    pub start: String,
+    pub low: String,
+    pub high: String,
+    pub close: String,
+    pub volume: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Candles {
+    pub candles: Vec<Candle>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Product {
+    pub product_id: String,
+    pub price: String,
+    pub price_percentage_change_24h: String,
+    pub volume_24h: String,
+    pub volume_percentage_change_24h: String,
+    pub base_increment: String,
+    pub quote_increment: String,
+    pub quote_min_size: String,
+    pub quote_max_size: String,
+    pub base_min_size: String,
+    pub base_max_size: String,
+    pub base_name: String,
+    pub quote_name: String,
+    pub watched: bool,
+    pub is_disabled: bool,
+    pub new: bool,
+    pub status: String,
+    pub cancel_only: bool,
+    pub limit_only: bool,
+    pub post_only: bool,
+    pub trading_disabled: bool,
+    pub action_mode: bool,
+    pub base_display_symbol: String,
+    pub quote_display_symbol: String,
+    pub product_type: Option<String>,
+    pub quote_currency_id: Option<String>,
+    pub base_currency_id: Option<String>,
+    pub fcm_trading_session_details: Option<FcmTradingSessionDetails>,
+    pub mid_market_price: Option<String>,
+    pub alias: Option<String>,
+    pub alias_to: Option<Vec<String>>,
+    pub view_only: Option<bool>,
+    pub price_increment: Option<String>,
+    pub display_name: Option<String>,
+    pub product_venue: Option<String>,
+    pub approximate_quote_24h_volume: Option<String>,
+    pub new_at: Option<String>,
+    pub market_cap: Option<String>,
+    pub icon_color: Option<String>,
+    pub display_name_overwrite: Option<String>,
+    pub is_alpha_testing: Option<bool>,
+    pub about_description: Option<String>,
+    pub future_product_details: Option<FutureProductDetails>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Products {
+    pub products: Vec<Product>,
+    pub num_products: usize,
+    pub pagination: Pagination,
 }
 
 #[derive(Deserialize, Debug)]
@@ -583,8 +704,7 @@ pub struct CancellationReason {
 }
 
 #[derive(Deserialize, Debug)]
-pub struct TransferSettings {
-}
+pub struct TransferSettings {}
 
 #[derive(Deserialize, Debug)]
 pub struct LedgerAccount {
@@ -720,23 +840,18 @@ pub struct Trade {
     pub fiat_denoted_total: Option<Amount>,
 }
 
-
 #[test]
 fn test_pagination_deserialize() {
     let input = r##"
 {
-    "ending_before": null,
-    "starting_after": null,
-    "previous_ending_before": null,
-    "next_starting_after": "d16ec1ba-b3f7-5d6a-a9c8-817930030324",
-    "limit": 25,
-    "order": "desc",
-    "previous_uri": null,
-    "next_uri": "/v2/accounts?starting_after=d16ec1ba-b3f7-5d6a-a9c8-817930030324"
+    "prev_cursor": null,
+    "next_cursor": null,
+    "has_next": "false",
+    "has_prev": "false"
 }"##;
     let pagination: Pagination = serde_json::from_slice(input.as_bytes()).unwrap();
-    assert_eq!(25, pagination.limit);
-    assert_eq!(Order::Descending, pagination.order);
+    assert_eq!(false, pagination.has_next);
+    assert_eq!(false, pagination.has_prev);
 }
 
 #[test]
