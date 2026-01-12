@@ -111,6 +111,36 @@ impl Private {
         }
     }
 
+    pub async fn get_spot_price(&self, pair: String, date: Option<String>) -> Result<f64> {
+        let uri = if let Some(date) = date {
+            UriTemplate::new("/v2/prices/{pair}/spot{?query*}")
+                .set("pair", pair)
+                .set("query", &[("date", date.as_ref())])
+                .build()
+        } else {
+            UriTemplate::new("/v2/prices/{pair}/spot")
+                .set("pair", pair)
+                .build()
+        };
+        let request = self.request(&uri);
+
+        thread::sleep(Duration::from_millis(350));
+
+        let request = request.clone().build();
+        let request_future = self._pub.client.request(request);
+
+        let response = request_future.await?;
+        let body = hyper::body::to_bytes(response.into_body()).await?;
+
+        match serde_json::from_slice::<SpotPrice>(&body) {
+            Ok(body) => Ok(body.data.amount.parse::<f64>().unwrap()),
+            Err(e) => match serde_json::from_slice(&body) {
+                Ok(coinbase_err) => Err(CBError::Coinbase(coinbase_err)),
+                Err(_) => Err(CBError::Serde(e)),
+            },
+        }
+    }
+
     pub async fn get_product_candles(
         &self,
         product_id: String,
@@ -493,10 +523,23 @@ pub struct FutureProductDetails {
 }
 
 #[derive(Deserialize, Debug)]
+pub struct SpotPriceData {
+    pub amount: String,
+    pub base: String,
+    pub currency: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct SpotPrice {
+    pub data: SpotPriceData,
+}
+
+#[derive(Deserialize, Debug)]
 pub struct Candle {
     pub start: String,
     pub low: String,
     pub high: String,
+    pub open: String,
     pub close: String,
     pub volume: String,
 }
